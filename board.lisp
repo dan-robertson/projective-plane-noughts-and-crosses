@@ -1,7 +1,7 @@
 (deftype piece () '(integer -1 1))
 
 (deftype board ()
-  '(array piece (4 4)))
+  '(simple-array piece (4 4)))
 
 (defun clean-board ()
   (make-array '(4 4) :element-type 'piece :initial-element 0))
@@ -81,13 +81,14 @@ x
     (defparameter *lines* (make-array (list (length lines)) :element-type 'board :initial-contents lines))))
 
 (defun determine-game (board)
+  (declare (type board board)
+	   (optimize (speed 3) (safety 0) (debug 0)))
   (let* ((lc (first (array-dimensions *lines*)))
 	 (c (make-array (list lc) :element-type '(integer -4 4) :initial-element 0)))
     (loop for p from 0 below 16
        for v = (row-major-aref board p)
        do (loop for l from 0 below lc
 	     do (incf (aref c l) (* (row-major-aref (aref *lines* l) p) v))))
-    (format t "~a~%" c)
     (loop for count across c
        count (= count 4) into +
        count (= count -4) into -
@@ -113,7 +114,7 @@ x
    +board-num-shift+
    ))
 
-(defparameter *game-memoize* (make-array '(43046721) :element-type '(integer -2 2) :initial-element 2)
+(defconstant +game-memoize+ (make-array '(43046721) :element-type '(integer -2 2) :initial-element 2)
   "-2 <=> invalid
 -1 <=> - wins
  0 <=> tie
@@ -121,6 +122,8 @@ x
  2 <=> undefined")
 
 (defun board-from-num (bn)
+  (declare (type (integer 0 43046721) bn)
+	   (optimize (speed 3) (safety 0) (debug 0)))
   (decf bn +board-num-shift+)
   (let ((board (clean-board)))
     (loop for i from 15 downto 0
@@ -134,11 +137,14 @@ x
 		      s))))
     board))
 
-(defun game-result (board-num)
-  (let ((m (aref *game-memoize* board-num)))
+(defun game-result (board-num &optional board)
+  (declare (type (or null board) board)
+	   (type (integer 0 43046721) board-num)
+	   (optimize (speed 3) (safety 0) (debug 0)))
+  (let ((m (aref +game-memoize+ board-num)))
     (when (= m 2)
-      (let ((m* (determine-game (board-from-num board-num))))
-	(setf (aref *game-memoize* board-num) m*
+      (let ((m* (determine-game (or board (board-from-num board-num)))))
+	(setf (aref +game-memoize+ board-num) m*
 	      m m*)))
     (case m
       (1 :player-1)
@@ -146,3 +152,71 @@ x
       (-1 :player-2)
       (-2 :invalid))))
 
+(defparameter *pc* 0)
+(defparameter *pcn* 5)
+(defparameter *pcl* 120)
+
+(defun pc (x)
+  (when (>= (incf *pc*) *pcl*)
+    (setf *pcl* (* (incf *pcn*) *pcl*))
+    (format t "Tried ~a =~a! combinations~%" *pc* (1- *pcn*))))
+
+(defun find-strategies* (board bn n turn btp &aux (we1 (= turn 1)))
+  "`board' is a board, `bn' is the corresponding number. This returns the results:
+win1, win2, tie1, tie2,
+where they are booleans corresponding to whether there exist winning/non-losing
+strategies for players 1 or 2. This considers a game starting with the passed
+board with `n' turns left where turn = -1 if it is player 2's turn or +1 if it is
+player 1's turn."
+  (declare (type board board)
+	   (type (integer 0 43046721) bn)
+	   (type (member -1 1) turn)
+	   (type (integer 0 16) n btp)
+	   (type (boolean) we1)
+	   (optimize (speed 3) (safety 0) (debug 0)))
+  (pc btp)
+  ;; First check if anyone has won:
+  (let ((r (game-result bn board)))
+    (case r
+      (:player-1 (return-from find-strategies* (values t nil t nil)))
+      (:player-2 (return-from find-strategies* (values nil t nil t)))
+      (:tie (when (= n 0)
+	      (return-from find-strategies* (values nil nil t t))))
+      (:invalid (error "invalid board reached: ~a" board))))
+  ;; Now try the moves we might make
+  (let ((win1 (if we1 nil t))
+	(win2 (if we1 t nil))
+	(noloss1 (if we1 nil t))
+	(noloss2 (if we1 t nil)))
+    (loop for i from 0 below 16
+       for p = (row-major-aref board i)
+       when (= p 0)
+       do (prog2 (setf (row-major-aref board i) turn)
+	      (multiple-value-bind
+		    (win+ win- nlo+ nlo-)
+		  (find-strategies*
+		   board
+		   (+ bn (* turn (aref +threes+ i)))
+		   (1- n)
+		   (- turn)
+		   i)
+		;; We want to collate this: is there some move such that the current player wins/doesn't lose
+		;; does the other player win/not lose no matter what we do?
+		(if we1
+		    (setf win1 (or win1 win+)
+			  win2 (and win2 win-)
+			  noloss1 (or noloss1 nlo+ (not win-))
+			  noloss2 (and noloss2 (or nlo- win- (not win+))))
+		    (setf win2 (or win2 win-)
+			  win1 (and win1 win+)
+			  noloss2 (or noloss2 nlo- (not win+))
+			  noloss1 (and noloss1 (or nlo+ win+ (not win-)))))
+		)
+	    (setf (row-major-aref board i) 0))
+       until (if we1
+		  (and win1 (not win2) noloss1 (not noloss2))
+		  (and win2 (not win1) noloss2 (not noloss1))))
+    (values win1 win2 noloss1 noloss2)))
+
+(defun find-strategies ()
+  (find-strategies* (clean-board) (board-num (clean-board)) 16 1 0))
