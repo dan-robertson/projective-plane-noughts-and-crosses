@@ -52,6 +52,14 @@ xxxx
 xxxx
     
     " "
+    
+ xxx
+x   
+    " "
+    
+  xx
+xx  
+    " "
 x   
  x  
   x 
@@ -220,3 +228,82 @@ player 1's turn."
 
 (defun find-strategies ()
   (find-strategies* (clean-board) (board-num (clean-board)) 16 1 0))
+
+(defun find-strategy* (board bn n)
+  "looks for a strategy for player 1 to win.
+returns a list (place arr) where place is where player 1 should play.
+NB place is row-major index, from 0 below 16.
+arr is a 4x4 array. each element is either:
+  nil - if the move is invalid
+  t - if player 1 wins
+  (place . arr) as before
+each representing the outcome if player 2 plays in that place.
+If there isn't a winning strategy, nil is returned.
+If the game has been won, t is returned."
+  (declare (type board board)
+	   (type (integer 0 43046721) bn)
+	   (type (integer 0 16) n)
+	   (optimize (speed 3) (safety 0) (debug 0)))
+  (pc 0)
+  ;; See if we've won:
+  (let ((r (game-result bn board)))
+    (case r
+      (:player-1 (return-from find-strategy* t))
+      (:player-2 (return-from find-strategy* nil))
+      (:tie (when (<= n 1) (return-from find-strategy* nil)))
+      (:invalid (error "invalid board reached: ~a" board))))
+  (loop for p1 from 0 below 16 ;for anywhere player 1 can play,
+     for strat = (make-array '(4 4) :initial-element nil)
+     for alwayswin =
+       (and
+	(zerop (row-major-aref board p1)) ;we ignore games where p1 can't place his peice
+	(prog2
+	    (setf (row-major-aref board p1) +1)
+	    (or
+	     (eq :player-1 (game-result (+ bn (expt 3 p1)) board)) ;does p1 play a winning move?
+	     (loop for p2 from 0 below 16 ;Can we always win if we play there
+		always (or
+			(not (zerop (row-major-aref board p2)))
+			(= p1 p2)
+			(prog2
+			    (setf (row-major-aref board p2) -1)
+			    (setf (row-major-aref strat p2)
+				  (find-strategy* board (+ bn (expt 3 p1) (- (expt 3 p2))) (- n 2)))
+			  (setf (row-major-aref board p2) 0)))))
+	  (setf (row-major-aref board p1) 0)))
+     until alwayswin
+     finally (return (and alwayswin (list p1 strat)))))
+
+(defun find-strategy ()
+  "serches for a strategy for player 1 to win"
+  (find-strategy* (clean-board) (board-num (clean-board)) 16))
+
+(defun write-board (board &optional (pre ""))
+	   (loop for i from 0 below 4
+	      do (write-char #\Newline)
+		(write-string pre)
+		(loop for j from 0 below 4 
+		   do (write-char (ecase (aref board i j)
+				    (1 #\x) (0 #\.) (-1 #\o))))))
+
+(defun write-strategy (strat &optional (pre "") (board (clean-board)))
+  (if (consp strat)
+      (progn
+	(format t "~acrosses should play ~a~%" pre
+		(aref #((0 0) (0 1) (0 2) (0 3)
+			(1 0) (1 1) (1 2) (1 3)
+			(2 0) (2 1) (2 2) (2 3)
+			(3 0) (3 1) (3 2) (3 3))
+		      (car strat)))
+	(setf (row-major-aref board (car strat)) +1)
+	(let ((pre (concatenate 'string pre " "))
+	      (st (cadr strat)))
+	  (loop for i from 0 below 16
+	     for s = (row-major-aref st i)
+	     when s
+	     do (format t "~aif naughts plays like:" pre)
+	       (setf (row-major-aref board i) -1)
+	       (write-board board pre) (write-line "")
+	       (write-strategy s pre board)
+	       (setf (row-major-aref board i) 0))
+	  (setf (row-major-aref board (car strat)) 0)))))
