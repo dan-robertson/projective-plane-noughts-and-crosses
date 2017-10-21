@@ -1,3 +1,7 @@
+(defpackage #:ppox
+  (:use #:cl))
+(in-package #:ppox)
+
 (deftype piece () '(integer -1 1))
 
 (deftype board ()
@@ -48,6 +52,14 @@ xxxx
     
     
     " "
+ xxx
+    
+    
+x   " "
+  xx
+    
+    
+xx  " "
     
 xxxx
     
@@ -98,14 +110,14 @@ x
        do (loop for l from 0 below lc
 	     do (incf (aref c l) (* (row-major-aref (aref *lines* l) p) v))))
     (loop for count across c
-       count (= count 4) into +
-       count (= count -4) into -
-       finally (return (if (zerop +)
-			   (if (zerop -)
+       count (= count 4) into n+
+       count (= count -4) into n-
+       finally (return (if (zerop n+)
+			   (if (zerop n-)
 			       0	;tie
 			       -1	;- wins
 			       )
-			   (if (zerop -)
+			   (if (zerop n-)
 			       +1	;+ wins
 			       -2	;invalid game
 			       ))))))
@@ -167,7 +179,7 @@ x
 (defun pc (x)
   (when (>= (incf *pc*) *pcl*)
     (setf *pcl* (* (incf *pcn*) *pcl*))
-    (format t "Tried ~a =~a! combinations~%" *pc* (1- *pcn*))))
+    (format t "Tried ~a = ~a! combinations~%" *pc* (1- *pcn*))))
 
 (defun find-strategies* (board bn n turn btp &aux (we1 (= turn 1)))
   "`board' is a board, `bn' is the corresponding number. This returns the results:
@@ -289,11 +301,11 @@ If the game has been won, t is returned."
 (defun write-strategy (strat &optional (pre "") (board (clean-board)))
   (if (consp strat)
       (progn
-	(format t "~acrosses should play ~a~%" pre
-		(aref #((0 0) (0 1) (0 2) (0 3)
-			(1 0) (1 1) (1 2) (1 3)
-			(2 0) (2 1) (2 2) (2 3)
-			(3 0) (3 1) (3 2) (3 3))
+	(format t "~aCrosses should play ~a.~%" pre
+		(aref #((0 0) (1 0) (2 0) (3 0)
+			(0 1) (1 1) (2 1) (3 1)
+			(0 2) (1 2) (2 2) (3 2)
+			(0 3) (1 3) (2 3) (3 3))
 		      (car strat)))
 	(setf (row-major-aref board (car strat)) +1)
 	(let ((pre (concatenate 'string pre " "))
@@ -301,9 +313,28 @@ If the game has been won, t is returned."
 	  (loop for i from 0 below 16
 	     for s = (row-major-aref st i)
 	     when s
-	     do (format t "~aif naughts plays like:" pre)
+	     do (format t "~aIf naughts plays like:" pre)
 	       (setf (row-major-aref board i) -1)
 	       (write-board board pre) (write-line "")
 	       (write-strategy s pre board)
 	       (setf (row-major-aref board i) 0))
 	  (setf (row-major-aref board (car strat)) 0)))))
+
+;;; check that p1 has a winning strategy (and start memoizing)
+(let ((*pc* 0)
+      (*pcn* 5)
+      (*pcl* 120))
+  (assert (equalp
+	   (multiple-value-list (find-strategies))
+	   '(t nil t nil))))
+
+(defparameter *strat* nil)
+;;; find and record the winning strategy
+(let ((*pc* 0)
+      (*pcn* 5)
+      (*pcl* 120))
+  (setf *strat* (find-strategy))
+  (with-open-file (*standard-output* "strat.txt" :direction :output
+				     :if-exists :overwrite)
+	   (write-strategy *strat*)))
+
